@@ -33,10 +33,6 @@
   - **Output:** A [CLS] token is prepended; positional embeddings are added; output context is the **CLS token embedding** projected to **ctx_dim = 256**.
 - **LSTM variant:** 2 layers, hidden size 256, final hidden state projected to ctx_dim 256.
 
-### Optional: HRF on rest input
-
-- If **use_hrf_kernel** is True: before the rest encoder, a **learnable 1D convolution over time** is applied to (B, L, V). The kernel is a linear combination of a fixed **HRF basis** (gamma + temporal derivative + dispersion derivative; 3 basis functions, length 20 TRs by default). Weights are learned (shared across ROIs by default, or per-ROI with `hrf_per_roi`). This is **not** applied to the task/EV side by default; it only affects the rest input to the encoder.
-
 ### Velocity network (v_θ(t, x_t | rest [, EVs]))
 
 - **Inputs (concatenated per timepoint):**  
@@ -85,14 +81,12 @@
 - **Flag:** `use_ev_hrf_timecourse` (off by default).  
 - **Event-level:** From EV table, **onset** and **duration** define a boxcar (or smooth sigmoid boxcar if `ev_hrf_smooth_boxcar`) in **window-relative TRs** (if `task_start_idx` is provided, onset is shifted by task start). Optional per-event **delay** and **width** are predicted from event tokens (`ev_hrf_use_delay_width`, default True) and applied to onset/duration.  
 - **HRF convolution:** The boxcar is convolved with a **per-event HRF kernel**. The kernel is a **learned linear combination of the same gamma-derived basis** (num_basis=3, kernel_len=20 TRs by default). Weights are computed from the event token (so each event gets its own HRF-shaped timecourse). Result is a **timecourse (B, N_events, T)** normalized to max 1 per event.  
-- **Per-timepoint conditioning:** **K** remains time-invariant: K = projK(event_tokens). **V** is made time-dependent: **V_tc(b,t,n,:) = event_token(b,n,:) * timecourse(b,n,t)**. The velocity net still uses **Q = Linear(x_t)**; attention is over events, but the **values** are scaled by the HRF timecourse at each timepoint t. So “EVs mapped to per-timepoint” here means: **HRF-convolved event timecourses** modulate the value vectors that each timepoint receives from each event; no HRF is applied to the BOLD rest input unless `use_hrf_kernel` is set.
+- **Per-timepoint conditioning:** **K** remains time-invariant: K = projK(event_tokens). **V** is made time-dependent: **V_tc(b,t,n,:) = event_token(b,n,:) * timecourse(b,n,t)**. The velocity net still uses **Q = Linear(x_t)**; attention is over events, but the **values** are scaled by the HRF timecourse at each timepoint t. So "EVs mapped to per-timepoint" here means: **HRF-convolved event timecourses** modulate the value vectors that each timepoint receives from each event. No HRF is applied to the BOLD rest input.
 
 ### Summary
 
-- **EVs → per-timepoint:** Either (1) **cross-attention only**: same event K/V for all timepoints (no HRF), or (2) **EV HRF timecourse**: same event keys, **values** scaled by a per-event, HRF-convolved timecourse so that conditioning varies by timepoint.  
-- **HRF usage:**  
-  - **Rest:** Optional learnable HRF-basis convolution on rest **before** the rest encoder (`use_hrf_kernel`).  
-  - **EVs:** Optional **only** when `use_ev_hrf_timecourse` is True: HRF is used to build **event-level timecourses** that weight the event **values** in cross-attention; no HRF is applied to raw BOLD for the EV path.
+- **EVs → per-timepoint:** Either (1) **cross-attention only**: same event K/V for all timepoints (no HRF), or (2) **EV HRF timecourse**: same event keys, **values** scaled by a per-event, HRF-convolved timecourse so that conditioning varies by timepoint.
+- **HRF usage:** Only on the EV path, and only when `use_ev_hrf_timecourse` is True: HRF is used to build **event-level timecourses** that weight the event **values** in cross-attention. No HRF is applied to the rest input.
 
 ---
 
@@ -112,7 +106,4 @@
 # EVs (when --use_evs)
 --num_conditions 32 --d_ev 64
 # Optional: --use_ev_hrf_timecourse, ev_hrf_kernel_len 20, ev_hrf_num_basis 3
-
-# Optional rest HRF
-# --use_hrf_kernel --hrf_kernel_len 20 --hrf_num_basis 3 [--hrf_per_roi]
 ```

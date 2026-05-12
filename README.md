@@ -92,7 +92,6 @@ Key flags (see `fm-fmri/METHOD_DETAILS.md` for the full architecture):
 
 - `--rest_encoder {transformer,lstm}` -- context encoder for the rest signal
 - `--use_evs` -- condition on event tables (onset / duration / condition_id)
-- `--use_hrf_kernel` -- learnable HRF basis convolution on the rest input
 - `--ode_steps 50` -- Euler steps for inference
 - `--freq_loss_weight 0.1 --fc_loss_weight 0.1` -- auxiliary loss weights
 

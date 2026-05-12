@@ -498,65 +498,6 @@ def _gamma_hrf_basis(
     return torch.stack(basis_list[:num_basis], dim=0)
 
 
-class LearnableHRFKernel(nn.Module):
-    """
-    Learnable 1D convolution kernel over time, parameterized as a linear combination
-    of HRF basis functions. Can be shared across ROIs or per-ROI.
-    Input (B, L, V) -> output (B, L, V) with same length (same padding).
-    """
-
-    def __init__(
-        self,
-        kernel_len: int = 20,
-        num_basis: int = 3,
-        v_dim: int = 1,
-        per_roi: bool = False,
-        tr: float = 1.0,
-    ):
-        super().__init__()
-        self.kernel_len = kernel_len
-        self.num_basis = num_basis
-        self.v_dim = v_dim
-        self.per_roi = per_roi
-        self.register_buffer("_basis", _gamma_hrf_basis(kernel_len, num_basis, tr=tr).clone())  # (num_basis, kernel_len)
-        if per_roi:
-            c = torch.zeros(v_dim, num_basis)
-            c[:, 0] = 1.0
-            self.coef = nn.Parameter(c)
-        else:
-            self.coef = nn.Parameter(torch.tensor([1.0] + [0.0] * (num_basis - 1), dtype=torch.float32))
-        self.pad = (kernel_len - 1) // 2
-
-    def _get_kernel(self) -> torch.Tensor:
-        # coef @ _basis: (num_basis,) @ (num_basis, L) -> (L,)  or  (V, num_basis) @ (num_basis, L) -> (V, L)
-        if self.per_roi:
-            k = (self.coef @ self._basis).clamp(min=1e-6)  # (V, kernel_len)
-            k = k / k.sum(dim=1, keepdim=True)
-            return k
-        else:
-            k = (self.coef @ self._basis).clamp(min=1e-6)  # (kernel_len,)
-            k = k / k.sum()
-            return k
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        x: (B, L, V). Convolve over dim=1 (time) with the learnable HRF kernel.
-        """
-        B, L, V = x.shape
-        kernel = self._get_kernel()
-        if self.per_roi:
-            # (V, 1, kernel_len) for Conv1d with in_channels=V, out_channels=V, groups=V
-            w = kernel.unsqueeze(1)
-            x_t = x.transpose(1, 2)
-            out = F.conv1d(x_t, w, padding=self.pad)
-            return out.transpose(1, 2)[:, :L]
-        else:
-            w = kernel.unsqueeze(0).unsqueeze(0)
-            x_t = x.transpose(1, 2)
-            out = F.conv1d(x_t, w.expand(V, 1, self.kernel_len), groups=V, padding=self.pad)
-            return out.transpose(1, 2)[:, :L]
-
-
 # ======================================================================
 # Event-conditioned HRF timecourse for attention K/V
 # ======================================================================
@@ -956,10 +897,6 @@ class FMTS(nn.Module):
         use_evs: bool = False,
         num_conditions: int = 32,
         d_ev: int = 64,
-        use_hrf_kernel: bool = False,
-        hrf_kernel_len: int = 20,
-        hrf_num_basis: int = 3,
-        hrf_per_roi: bool = False,
         use_ev_hrf_timecourse: bool = False,
         ev_hrf_kernel_len: int = 20,
         ev_hrf_num_basis: int = 3,
@@ -972,7 +909,6 @@ class FMTS(nn.Module):
         super().__init__()
         self.use_evs = use_evs
         self.use_prior_detach = use_prior_detach
-        self.use_hrf_kernel = use_hrf_kernel
         if rest_encoder == "transformer":
             self.rest_enc = RestTransformerEncoder(
                 v_dim=v_dim,
@@ -992,16 +928,6 @@ class FMTS(nn.Module):
             )
         self.t_emb = TimeEmbedding(dim=t_dim)
         self.ev_encoder = EVEncoder(num_conditions=num_conditions, d_ev=d_ev) if use_evs else None
-        self.hrf_kernel = (
-            LearnableHRFKernel(
-                kernel_len=hrf_kernel_len,
-                num_basis=hrf_num_basis,
-                v_dim=v_dim,
-                per_roi=hrf_per_roi,
-            )
-            if use_hrf_kernel
-            else None
-        )
         event_hrf_tc = None
         if use_evs and use_ev_hrf_timecourse:
             event_hrf_tc = EventHRFTimecourse(
@@ -1022,10 +948,7 @@ class FMTS(nn.Module):
         self.prior_head = PriorHead(ctx_dim=ctx_dim, v_dim=v_dim, prior_K=prior_K)
 
     def _rest_ctx(self, x_rest: torch.Tensor) -> torch.Tensor:
-        x_rest_in = x_rest
-        if self.hrf_kernel is not None:
-            x_rest_in = self.hrf_kernel(x_rest)
-        return self.rest_enc(x_rest_in)
+        return self.rest_enc(x_rest)
 
     def sample_x0(self, x_rest: torch.Tensor, T: int) -> torch.Tensor:
         """
@@ -1892,11 +1815,6 @@ def main():
     p.add_argument("--t_dim", type=int, default=128)
     p.add_argument("--num_conditions", type=int, default=32, help="Max condition code for EV embedding (use_evs)")
     p.add_argument("--d_ev", type=int, default=64, help="EV token dim and cross-attention dim (use_evs)")
-    # Learnable HRF kernel (applied to rest before encoding)
-    p.add_argument("--use_hrf_kernel", action="store_true", help="Apply learnable HRF-basis convolution to rest input")
-    p.add_argument("--hrf_kernel_len", type=int, default=20, help="HRF kernel length in TRs")
-    p.add_argument("--hrf_num_basis", type=int, default=3, help="Number of HRF basis functions (gamma + derivative + optional)")
-    p.add_argument("--hrf_per_roi", action="store_true", help="Use a separate HRF kernel per ROI (else shared)")
     # Event HRF timecourse: per-event HRF weights → timecourse K/V for attention
     p.add_argument("--use_ev_hrf_timecourse", action="store_true", help="Use HRF timecourse-conditioned event K/V (requires --use_evs)")
     p.add_argument("--ev_hrf_kernel_len", type=int, default=20, help="HRF kernel length in TRs for event timecourse")
@@ -2029,12 +1947,12 @@ def main():
             saved_args = ckpt["args"]
             print("Found saved args in checkpoint. Using saved model architecture.")
             # Override args with saved ones for model architecture
-            for key in ["use_evs", "use_hrf_kernel", "use_ev_hrf_timecourse", 
+            for key in ["use_evs", "use_ev_hrf_timecourse",
                        "rest_encoder", "rest_hidden", "ctx_dim", "t_dim",
-                       "rest_patch_len", "rest_num_layers", "rest_nhead", 
+                       "rest_patch_len", "rest_num_layers", "rest_nhead",
                        "rest_dim_feedforward", "prior_K", "use_prior_detach",
-                       "num_conditions", "d_ev", "hrf_kernel_len", "hrf_num_basis",
-                       "hrf_per_roi", "ev_hrf_kernel_len", "ev_hrf_num_basis",
+                       "num_conditions", "d_ev",
+                       "ev_hrf_kernel_len", "ev_hrf_num_basis",
                        "no_ev_hrf_delay_width", "ev_hrf_smooth_boxcar", "ev_hrf_boxcar_sigma"]:
                 if key in saved_args:
                     setattr(args, key, saved_args[key])
@@ -2059,10 +1977,6 @@ def main():
         use_evs=args.use_evs,
         num_conditions=args.num_conditions,
         d_ev=args.d_ev,
-        use_hrf_kernel=args.use_hrf_kernel,
-        hrf_kernel_len=args.hrf_kernel_len,
-        hrf_num_basis=args.hrf_num_basis,
-        hrf_per_roi=args.hrf_per_roi,
         use_ev_hrf_timecourse=args.use_ev_hrf_timecourse,
         ev_hrf_kernel_len=args.ev_hrf_kernel_len,
         ev_hrf_num_basis=args.ev_hrf_num_basis,
