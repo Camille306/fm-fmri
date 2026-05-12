@@ -2,8 +2,7 @@
 
 This repository contains the code accompanying our work on predicting
 task-evoked fMRI sequences from resting-state fMRI using conditional flow
-matching, together with a suite of baselines (TimeGAN, TimeVAE, DDPM,
-Diffusion-TS, LSTM-GAN, and Time-XL).
+matching.
 
 The released code targets the **HCP** (Human Connectome Project) setup: rest
 -> task prediction on the Shen-268 atlas across the seven HCP tasks (emotion,
@@ -18,6 +17,12 @@ gambling, language, motor, relational, social, working memory).
 > public release. The HCP code in this repository is self-contained and
 > reproduces the HCP results in the paper.
 >
+> **A note on baselines.** Re-implementations of comparison baselines used in
+> the paper (TimeGAN, TimeVAE, DDPM, Diffusion-TS, LSTM-GAN, Time-XL) are not
+> included in this release. Each of those methods has its own canonical
+> implementation by the original authors, and we refer readers to those
+> repositories.
+>
 > Subject identifiers, lab-internal paths, and HPC-specific submission
 > scripts have also been removed. Only source code is included; raw and
 > derived data must be obtained separately (see "Data" below).
@@ -28,17 +33,12 @@ gambling, language, motor, relational, social, working memory).
 
 ```
 fm-fmri/             Main flow-matching model (the primary method)
-baselines/           Re-organized baseline implementations for the HCP setup
-timegan/             TimeGAN baseline (HCP)
-timeVAE/             TimeVAE baseline (HCP)
-time-xl/             Time-XL (xLSTM / Mamba / LSTM) baselines
-fm-ts/               Flow-matching time-series baseline (HCP, no EVs)
 re_eval/             Re-evaluation utilities (FC / PSD / discriminative scores)
 task_preprocess/     HCP task-fMRI preprocessing helpers
 model_submission/    Submission collection script
-dataset.py           HCPRestingFCDataset (shared across baselines)
+dataset.py           HCPRestingFCDataset (shared dataloader)
 dataset_timeseries.py / model.py / train.py / inference.py
-                     Original rest-to-task pipeline used by several baselines
+                     Supporting rest-to-task pipeline modules
 ```
 
 Each subfolder has its own `README.md` (or comments at the top of the main
@@ -59,8 +59,6 @@ pip install torch torchvision torchaudio   # pick the CUDA build for your system
 pip install numpy scipy pandas tqdm matplotlib scikit-learn h5py einops
 pip install nibabel              # if you use task_preprocess/
 ```
-
-The `time-xl/` subproject has its own `requirements.txt`.
 
 ---
 
@@ -90,8 +88,6 @@ python fm-fmri/fm_fmri.py \
 
 ## Quick start
 
-### 1. Flow matching (main method)
-
 ```bash
 python fm-fmri/fm_fmri.py --task_name emotion --epochs 50 --batch_size 16
 ```
@@ -104,37 +100,11 @@ Key flags (see `fm-fmri/METHOD_DETAILS.md` for the full architecture):
 - `--ode_steps 50` -- Euler steps for inference
 - `--freq_loss_weight 0.1 --fc_loss_weight 0.1` -- auxiliary loss weights
 
-### 2. HCP baselines
-
-All baselines share the same dataloader and evaluation protocol:
-
-```bash
-python baselines/train_timegan.py        --task_name emotion
-python baselines/timevae_baseline.py     --task_name emotion
-python baselines/ddpm_baseline.py        --task_name emotion
-python baselines/diffusion_ts_baseline.py --task_name emotion
-python baselines/train_lstm_gan.py       --task_name emotion
-```
-
-Outputs (per-task metrics, FC / PSD figures for the closest subject) are
-written to `--save_dir` (default `./results_<baseline>_<task>`).
-
-### 3. Re-evaluation
-
-`re_eval/` builds JSON configs that point at a set of trained baselines, then
-recomputes metrics (FC similarity, PSD difference, discriminative score,
-cFID) on a common evaluation grid:
-
-```bash
-python re_eval/build_baselines_config.py --out re_eval/my_config.json
-python re_eval/run_all_baselines_metrics.py --config re_eval/my_config.json
-```
-
 ---
 
-## Evaluation protocol (shared across HCP baselines)
+## Evaluation protocol
 
-All HCP-side methods use the same sliding-window protocol:
+The model uses a sliding-window protocol:
 
 1. **Windowing.** From each subject's rest sequence, take a window of
    `lookback_length` TRs; predict the following `prediction_length` TRs of
@@ -144,32 +114,9 @@ All HCP-side methods use the same sliding-window protocol:
 3. **Metrics.** MSE, MAE, FC similarity (Pearson on the upper triangle of the
    correlation matrix), and PSD difference (mean ROI power spectrum).
 
-Per-baseline scripts save two qualitative figures for the closest test
+The evaluation script saves two qualitative figures for the closest test
 subject (lowest MSE) -- `closest_subject_<id>_fc.png` and
 `closest_subject_<id>_psd.png` -- produced by helpers in `eval_viz.py`.
-
----
-
-## Reproducing the paper (HCP results)
-
-A representative end-to-end run on a single HCP task:
-
-```bash
-# Train all baselines + the main flow-matching model
-python baselines/train_timegan.py        --task_name emotion --save_dir runs/timegan_emotion
-python baselines/timevae_baseline.py     --task_name emotion --save_dir runs/timevae_emotion
-python baselines/ddpm_baseline.py        --task_name emotion --save_dir runs/ddpm_emotion
-python baselines/diffusion_ts_baseline.py --task_name emotion --save_dir runs/diffts_emotion
-python baselines/train_lstm_gan.py       --task_name emotion --save_dir runs/lstmgan_emotion
-python fm-fmri/fm_fmri.py                --task_name emotion --save_dir runs/fm_emotion
-
-# Build a re-eval config and recompute metrics on a common grid
-python re_eval/build_baselines_config.py --runs_root runs --out re_eval/emotion.json
-python re_eval/run_all_baselines_metrics.py --config re_eval/emotion.json
-```
-
-Substitute `emotion` with any HCP task (`gambling`, `language`, `motor`,
-`relational`, `social`, `wm`).
 
 ---
 
@@ -191,5 +138,4 @@ If this code is useful in your research, please cite the accompanying paper.
 
 ## License
 
-Released under the MIT License -- see `LICENSE`. The vendored `time-xl/`
-subproject retains its own license; see `time-xl/LICENSE` (Apache 2.0).
+Released under the MIT License -- see `LICENSE`.
