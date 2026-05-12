@@ -2157,31 +2157,27 @@ def main():
     # cFID-FC: conditional Fréchet distance on FC features (paired real vs generated)
     cfid_fc_value = None
     try:
-        _repo_root = Path(__file__).resolve().parent.parent
-        _re_eval = _repo_root / "re_eval"
-        if _re_eval.exists():
-            sys.path.insert(0, str(_re_eval))
-            from fc_utils import cfid_fc as _cfid_fc
-            real_list, gen_list = [], []
-            with torch.no_grad():
-                for batch in test_loader:
-                    x_rest = batch["input"].to(args.device).float()
-                    x_task = batch["target"].to(args.device).float()
-                    starts = batch["task_start_idx"]
-                    ev = batch["ev"].to(args.device).float() if batch.get("ev") is not None else None
-                    ev_mask = batch["ev_mask"].to(args.device).float() if batch.get("ev_mask") is not None else None
-                    task_start_idx = starts.to(args.device) if isinstance(starts, torch.Tensor) else torch.tensor(starts, device=args.device, dtype=torch.float32)
-                    x_pred = model.sample(
-                        x_rest, T_pred=args.prediction_length, steps=args.ode_steps,
-                        ev=ev, ev_mask=ev_mask, task_start_idx=task_start_idx,
-                    )
-                    real_list.append(x_task.cpu().numpy())
-                    gen_list.append(x_pred.cpu().numpy())
-            X_real = np.concatenate(real_list, axis=0)
-            X_gen = np.concatenate(gen_list, axis=0)
-            rng = np.random.default_rng(42)
-            cfid_fc_value = _cfid_fc(X_real, X_gen, eps=1e-6, max_fc_dim=500, rng=rng)
-            test_metrics["cfid_fc"] = cfid_fc_value
+        from fc_utils import cfid_fc as _cfid_fc
+        real_list, gen_list = [], []
+        with torch.no_grad():
+            for batch in test_loader:
+                x_rest = batch["input"].to(args.device).float()
+                x_task = batch["target"].to(args.device).float()
+                starts = batch["task_start_idx"]
+                ev = batch["ev"].to(args.device).float() if batch.get("ev") is not None else None
+                ev_mask = batch["ev_mask"].to(args.device).float() if batch.get("ev_mask") is not None else None
+                task_start_idx = starts.to(args.device) if isinstance(starts, torch.Tensor) else torch.tensor(starts, device=args.device, dtype=torch.float32)
+                x_pred = model.sample(
+                    x_rest, T_pred=args.prediction_length, steps=args.ode_steps,
+                    ev=ev, ev_mask=ev_mask, task_start_idx=task_start_idx,
+                )
+                real_list.append(x_task.cpu().numpy())
+                gen_list.append(x_pred.cpu().numpy())
+        X_real = np.concatenate(real_list, axis=0)
+        X_gen = np.concatenate(gen_list, axis=0)
+        rng = np.random.default_rng(42)
+        cfid_fc_value = _cfid_fc(X_real, X_gen, eps=1e-6, max_fc_dim=500, rng=rng)
+        test_metrics["cfid_fc"] = cfid_fc_value
     except Exception as e:
         print(f"[cFID-FC] Skipped: {e}")
 

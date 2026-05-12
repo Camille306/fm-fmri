@@ -33,12 +33,8 @@ gambling, language, motor, relational, social, working memory).
 
 ```
 fm-fmri/             Main flow-matching model (the primary method)
-re_eval/             Re-evaluation utilities (FC / PSD / discriminative scores)
 task_preprocess/     HCP task-fMRI preprocessing helpers
 model_submission/    Submission collection script
-dataset.py           HCPRestingFCDataset (shared dataloader)
-dataset_timeseries.py / model.py / train.py / inference.py
-                     Supporting rest-to-task pipeline modules
 ```
 
 Each subfolder has its own `README.md` (or comments at the top of the main
