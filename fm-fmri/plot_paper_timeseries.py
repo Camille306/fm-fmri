@@ -282,12 +282,6 @@ def load_and_run_one_batch(
         use_evs=use_evs,
         num_conditions=saved.get("num_conditions", 32),
         d_ev=saved.get("d_ev", 64),
-        use_ev_hrf_timecourse=saved.get("use_ev_hrf_timecourse", False),
-        ev_hrf_kernel_len=saved.get("ev_hrf_kernel_len", 20),
-        ev_hrf_num_basis=saved.get("ev_hrf_num_basis", 3),
-        ev_hrf_use_delay_width=not saved.get("no_ev_hrf_delay_width", True),
-        ev_hrf_smooth_boxcar=saved.get("ev_hrf_smooth_boxcar", False),
-        ev_hrf_boxcar_sigma=saved.get("ev_hrf_boxcar_sigma", 0.5),
         prior_K=saved.get("prior_K", 8),
         use_prior_detach=saved.get("use_prior_detach", False),
     ).to(device)

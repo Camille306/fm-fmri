@@ -457,181 +457,6 @@ def compute_frequency_difference(pred: np.ndarray, target: np.ndarray, fs: float
 
 
 # ======================================================================
-# Learnable HRF kernel (basis = weighted sum of gamma-like functions)
-# ======================================================================
-
-def _gamma_hrf_basis(
-    kernel_len: int,
-    num_basis: int = 3,
-    tr: float = 1.0,
-) -> torch.Tensor:
-    """
-    Build HRF basis functions over time (in TRs). Returns (num_basis, kernel_len).
-    Basis 0: canonical gamma (peak ~5s). Basis 1: temporal derivative. Basis 2: dispersion derivative (optional).
-    Time grid: 0, tr, 2*tr, ..., (kernel_len-1)*tr.
-    """
-    t = torch.linspace(0, (kernel_len - 1) * tr, kernel_len, dtype=torch.float32)
-    # Canonical double-gamma style: peak ~5s, undershoot ~15s (approximate)
-    a1, a2 = 6.0, 16.0
-    c1, c2 = 1.0, 1.0 / 6.0
-    h = c1 * (t ** (a1 - 1)) * torch.exp(-t) - c2 * (t ** (a2 - 1)) * torch.exp(-t)
-    h = h * (t >= 0).float()
-    h = h / (h.sum() + 1e-8)
-
-    basis_list = [h]
-    if num_basis >= 2:
-        # Temporal derivative (shifted difference)
-        dt = t[1] - t[0] if len(t) > 1 else 1.0
-        h_diff = torch.zeros_like(h)
-        h_diff[1:] = (h[1:] - h[:-1]) / dt
-        h_diff = h_diff / (h_diff.abs().sum() + 1e-8)
-        basis_list.append(h_diff)
-    if num_basis >= 3:
-        # Second basis: later peak (dispersion-like)
-        a1_late, a2_late = 8.0, 20.0
-        h2 = c1 * (t ** (a1_late - 1)) * torch.exp(-t) - c2 * (t ** (a2_late - 1)) * torch.exp(-t)
-        h2 = h2 * (t >= 0).float()
-        h2 = h2 / (h2.sum() + 1e-8)
-        basis_list.append(h2)
-    for _ in range(num_basis - len(basis_list)):
-        basis_list.append(h.clone())  # pad with canonical if num_basis > 3
-    return torch.stack(basis_list[:num_basis], dim=0)
-
-
-# ======================================================================
-# Event-conditioned HRF timecourse for attention K/V
-# ======================================================================
-
-def _build_boxcar_hard(
-    onset_rel: torch.Tensor,
-    duration: torch.Tensor,
-    T: int,
-) -> torch.Tensor:
-    """
-    Hard boxcar u(t) = 1 for onset_rel <= t < onset_rel + duration, else 0.
-    onset_rel: (B, N, 1), duration: (B, N, 1). Returns (B, N, T).
-    """
-    t_grid = torch.arange(T, device=onset_rel.device, dtype=onset_rel.dtype).view(1, 1, -1)
-    u = ((t_grid >= onset_rel) & (t_grid < onset_rel + duration)).float()
-    return u
-
-
-def _build_boxcar_smooth(
-    onset_rel: torch.Tensor,
-    duration: torch.Tensor,
-    T: int,
-    sigma: float = 0.5,
-) -> torch.Tensor:
-    """
-    Smooth boxcar with sigmoids: u(t) rises at onset, falls at onset+duration.
-    onset_rel: (B, N, 1), duration: (B, N, 1). Returns (B, N, T).
-    """
-    t_grid = torch.arange(T, device=onset_rel.device, dtype=onset_rel.dtype).view(1, 1, -1)
-    rise = torch.sigmoid((t_grid - onset_rel) / max(sigma, 1e-5))
-    fall = torch.sigmoid((onset_rel + duration - t_grid) / max(sigma, 1e-5))
-    return rise * fall
-
-
-class EventHRFTimecourse(nn.Module):
-    """
-    Build a boxcar u(t) from EV onset (col 0) and duration (col 1), convolve with
-    per-event HRF basis to get timecourse. K is time-invariant: K_b,n = projK(z_b,n).
-    V is timecourse-weighted event tokens. Timecourse normalized to max 1 per event.
-    """
-
-    def __init__(
-        self,
-        d_ev: int,
-        num_basis: int = 3,
-        kernel_len: int = 20,
-        use_delay_width: bool = False,
-        tr: float = 1.0,
-        delay_max: float = 5.0,
-        width_min: float = 0.5,
-        width_max: float = 3.0,
-        use_smooth_boxcar: bool = False,
-        boxcar_sigma: float = 0.5,
-    ):
-        super().__init__()
-        self.d_ev = d_ev
-        self.num_basis = num_basis
-        self.kernel_len = kernel_len
-        self.use_delay_width = use_delay_width
-        self.delay_max = delay_max
-        self.width_min = width_min
-        self.width_max = width_max
-        self.use_smooth_boxcar = use_smooth_boxcar
-        self.boxcar_sigma = boxcar_sigma
-        self.register_buffer("_basis", _gamma_hrf_basis(kernel_len, num_basis, tr=tr).clone())
-        self.hrf_weights_proj = nn.Linear(d_ev, num_basis)
-        self.proj_k = nn.Linear(d_ev, d_ev)
-        if use_delay_width:
-            self.delay_width_proj = nn.Linear(d_ev, 2)
-
-    def forward(
-        self,
-        event_tokens: torch.Tensor,
-        ev: torch.Tensor,
-        T: int,
-        ev_mask: torch.Tensor,
-        task_start_idx: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        event_tokens: (B, N, d_ev), ev: (B, N, 4) [onset, duration, amplitude, condition], ev_mask: (B, N).
-        If task_start_idx (B,) is given, EV col 0/1 are in global task TRs and we subtract start for this window.
-        Returns:
-          timecourse: (B, N, T) normalized to max 1 per event
-          K: (B, N, d_ev) time-invariant keys (projK(z))
-          V_tc: (B, T, N, d_ev) timecourse-weighted values
-        """
-        B, N, _ = event_tokens.shape
-        device = event_tokens.device
-
-        onset = ev[:, :, 0:1].float()
-        duration = ev[:, :, 1:2].float().clamp(min=1e-3)
-        if task_start_idx is not None:
-            start = (
-                task_start_idx
-                if isinstance(task_start_idx, torch.Tensor)
-                else torch.tensor(task_start_idx, device=device, dtype=onset.dtype)
-            )
-            if start.dim() == 1:
-                start = start.view(B, 1, 1)
-            onset = onset - start
-        onset_rel = onset.clamp(min=0.0)
-
-        if self.use_delay_width:
-            dw = self.delay_width_proj(event_tokens)
-            delay = (F.softplus(dw[:, :, 0:1]) + 0.0).clamp(max=self.delay_max)
-            width = (F.softplus(dw[:, :, 1:2]) + 1.0).clamp(min=self.width_min, max=self.width_max)
-            onset_rel = (onset_rel + delay).clamp(min=0.0)
-            duration = duration * width
-
-        if self.use_smooth_boxcar:
-            boxcar = _build_boxcar_smooth(onset_rel, duration, T, sigma=self.boxcar_sigma)
-        else:
-            boxcar = _build_boxcar_hard(onset_rel, duration, T)
-
-        hrf_weights = F.softmax(self.hrf_weights_proj(event_tokens), dim=-1)
-        kernel = (hrf_weights @ self._basis).clamp(min=1e-6)
-        kernel = kernel / kernel.sum(dim=-1, keepdim=True)
-
-        pad = (self.kernel_len - 1) // 2
-        boxcar_flat = boxcar.reshape(B * N, 1, T)
-        kernel_flat = kernel.reshape(B * N, 1, self.kernel_len)
-        timecourse = F.conv1d(boxcar_flat, kernel_flat, padding=pad, groups=B * N)
-        timecourse = timecourse.reshape(B, N, T)
-        timecourse = timecourse * ev_mask.unsqueeze(-1)
-
-        tc_max = timecourse.amax(dim=2, keepdim=True).clamp(min=1e-8)
-        timecourse = timecourse / tc_max
-
-        K = self.proj_k(event_tokens)
-        V_tc = (event_tokens.unsqueeze(2) * timecourse.unsqueeze(-1)).transpose(1, 2)
-        return timecourse, K, V_tc
-
-
-# ======================================================================
 # FM-TS model: Rest encoder + conditional velocity network
 # ======================================================================
 
@@ -796,10 +621,8 @@ class VelocityNet(nn.Module):
     """
     v_theta(t, x_t | rest [, event_tokens]):
     x_t: (B,T,V); rest_ctx: (B,C); t_emb: (B,D).
-    If event_tokens and ev_mask are given:
-      - If event_hrf_timecourse is set: build per-event HRF timecourses, use timecourse-weighted
-        K/V so x_t queries attend to timecourse-conditioned event representations.
-      - Else: standard cross-attend with Q from x_t, K/V = event_tokens.
+    If event_tokens and ev_mask are given: standard cross-attend with Q from x_t,
+    K/V = event_tokens.
     output: (B,T,V)
     """
     def __init__(
@@ -810,11 +633,9 @@ class VelocityNet(nn.Module):
         d_ev: int = 0,
         hidden: int = 512,
         dropout: float = 0.1,
-        event_hrf_timecourse: "EventHRFTimecourse | None" = None,
     ):
         super().__init__()
         self.d_ev = d_ev
-        self.event_hrf_timecourse = event_hrf_timecourse
         self.in_dim = v_dim + ctx_dim + t_dim + (d_ev if d_ev > 0 else 0)
         self.proj_q = nn.Linear(v_dim, d_ev, bias=False) if d_ev > 0 else None
         self.net = nn.Sequential(
@@ -834,8 +655,6 @@ class VelocityNet(nn.Module):
         t_emb,
         event_tokens=None,
         ev_mask=None,
-        ev=None,
-        task_start_idx=None,
     ):
         B, T, V = x_t.shape
         ctx = rest_ctx.unsqueeze(1).expand(B, T, rest_ctx.shape[-1])
@@ -854,23 +673,13 @@ class VelocityNet(nn.Module):
             # For subjects with no valid events, replace -inf row with 0 before softmax
             # to avoid NaN; event_ctx is zeroed out for those subjects afterwards.
             all_masked = ~has_events.expand_as(ev_mask.unsqueeze(1))   # (B,1,N)
-            if self.event_hrf_timecourse is not None and ev is not None:
-                _, K, V_tc = self.event_hrf_timecourse(
-                    event_tokens, ev, T, ev_mask, task_start_idx=task_start_idx
-                )
-                attn = torch.bmm(Q, K.transpose(1, 2)) * scale
-                attn = attn.masked_fill(ev_mask.unsqueeze(1) == 0, float("-inf"))
-                attn = attn.masked_fill(all_masked, 0.0)
-                attn = F.softmax(attn, dim=-1)
-                event_ctx = (attn.unsqueeze(-1) * V_tc).sum(2)
-            else:
-                K = event_tokens
-                V = event_tokens
-                attn = torch.bmm(Q, K.transpose(1, 2)) * scale
-                attn = attn.masked_fill(ev_mask.unsqueeze(1) == 0, float("-inf"))
-                attn = attn.masked_fill(all_masked, 0.0)
-                attn = F.softmax(attn, dim=-1)
-                event_ctx = torch.bmm(attn, V)
+            K = event_tokens
+            V = event_tokens
+            attn = torch.bmm(Q, K.transpose(1, 2)) * scale
+            attn = attn.masked_fill(ev_mask.unsqueeze(1) == 0, float("-inf"))
+            attn = attn.masked_fill(all_masked, 0.0)
+            attn = F.softmax(attn, dim=-1)
+            event_ctx = torch.bmm(attn, V)
             # Zero out event context for subjects that had no valid EV events
             event_ctx = event_ctx * has_events.float().expand_as(event_ctx)
             inp = torch.cat([x_t, ctx, te, event_ctx], dim=-1)
@@ -897,12 +706,6 @@ class FMTS(nn.Module):
         use_evs: bool = False,
         num_conditions: int = 32,
         d_ev: int = 64,
-        use_ev_hrf_timecourse: bool = False,
-        ev_hrf_kernel_len: int = 20,
-        ev_hrf_num_basis: int = 3,
-        ev_hrf_use_delay_width: bool = True,
-        ev_hrf_smooth_boxcar: bool = False,
-        ev_hrf_boxcar_sigma: float = 0.5,
         prior_K: int = 8,
         use_prior_detach: bool = False,
     ):
@@ -928,22 +731,11 @@ class FMTS(nn.Module):
             )
         self.t_emb = TimeEmbedding(dim=t_dim)
         self.ev_encoder = EVEncoder(num_conditions=num_conditions, d_ev=d_ev) if use_evs else None
-        event_hrf_tc = None
-        if use_evs and use_ev_hrf_timecourse:
-            event_hrf_tc = EventHRFTimecourse(
-                d_ev=d_ev,
-                num_basis=ev_hrf_num_basis,
-                kernel_len=ev_hrf_kernel_len,
-                use_delay_width=ev_hrf_use_delay_width,
-                use_smooth_boxcar=ev_hrf_smooth_boxcar,
-                boxcar_sigma=ev_hrf_boxcar_sigma,
-            )
         self.vnet = VelocityNet(
             v_dim=v_dim,
             ctx_dim=ctx_dim,
             t_dim=t_dim,
             d_ev=d_ev if use_evs else 0,
-            event_hrf_timecourse=event_hrf_tc,
         )
         self.prior_head = PriorHead(ctx_dim=ctx_dim, v_dim=v_dim, prior_K=prior_K)
 
@@ -981,7 +773,7 @@ class FMTS(nn.Module):
         corr = z @ U.transpose(-1, -2)
         return mean.unsqueeze(1) + std.unsqueeze(1) * eps + corr
 
-    def velocity(self, t, x_t, x_rest, ev=None, ev_mask=None, task_start_idx=None):
+    def velocity(self, t, x_t, x_rest, ev=None, ev_mask=None):
         ctx = self._rest_ctx(x_rest)
         te = self.t_emb(t)
         event_tokens = None
@@ -991,14 +783,12 @@ class FMTS(nn.Module):
             x_t, ctx, te,
             event_tokens=event_tokens,
             ev_mask=ev_mask,
-            ev=ev,
-            task_start_idx=task_start_idx,
         )
 
-    def sample(self, x_rest, T_pred: int, steps: int = 50, ev=None, ev_mask=None, task_start_idx=None):
+    def sample(self, x_rest, T_pred: int, steps: int = 50, ev=None, ev_mask=None):
         """
         Encode rest -> sample x0 from prior -> integrate ODE to t=1.
-        x_rest: (B,L,V); optional ev (B,N_events,4), ev_mask (B,N_events), task_start_idx (B,) for window-relative EV onsets.
+        x_rest: (B,L,V); optional ev (B,N_events,4), ev_mask (B,N_events).
         returns x1_hat: (B,T,V)
         """
         x = self.sample_x0(x_rest, T_pred)
@@ -1006,7 +796,7 @@ class FMTS(nn.Module):
         dt = 1.0 / steps
         for k in range(steps):
             t = torch.full((B,), k * dt, device=x_rest.device)
-            v = self.velocity(t, x, x_rest, ev=ev, ev_mask=ev_mask, task_start_idx=task_start_idx)
+            v = self.velocity(t, x, x_rest, ev=ev, ev_mask=ev_mask)
             x = x + dt * v
         return x
 
@@ -1177,7 +967,6 @@ def flow_matching_loss(
     x_task,
     ev=None,
     ev_mask=None,
-    task_start_idx=None,
     fm_loss_weight: float = 1.0,
     freq_loss_weight: float = 0.0,
     fc_loss_weight: float = 0.0,
@@ -1208,7 +997,7 @@ def flow_matching_loss(
     x_t = (1.0 - t_view) * x0 + t_view * x1
     v_star = (x1 - x0)
 
-    v_pred = model.velocity(t, x_t, x_rest, ev=ev, ev_mask=ev_mask, task_start_idx=task_start_idx)
+    v_pred = model.velocity(t, x_t, x_rest, ev=ev, ev_mask=ev_mask)
     loss_fm = F.mse_loss(v_pred, v_star)
 
     has_aux = freq_loss_weight > 0 or fc_loss_weight > 0 or coh_loss_weight > 0
@@ -1225,7 +1014,7 @@ def flow_matching_loss(
     # --- Frequency (PSD) loss: independent x0 → own gradient path ---
     if freq_loss_weight > 0:
         x0_freq = model.sample_x0(x_rest, T)
-        v_freq = model.velocity(t_zero, x0_freq, x_rest, ev=ev, ev_mask=ev_mask, task_start_idx=task_start_idx)
+        v_freq = model.velocity(t_zero, x0_freq, x_rest, ev=ev, ev_mask=ev_mask)
         x1_hat_freq = x0_freq + v_freq
         loss_freq = frequency_loss_torch(x1_hat_freq, x1)
         loss_total = loss_total + freq_loss_weight * loss_freq
@@ -1233,7 +1022,7 @@ def flow_matching_loss(
     # --- FC loss: independent x0 → own gradient path ---
     if fc_loss_weight > 0:
         x0_fc = model.sample_x0(x_rest, T)
-        v_fc = model.velocity(t_zero, x0_fc, x_rest, ev=ev, ev_mask=ev_mask, task_start_idx=task_start_idx)
+        v_fc = model.velocity(t_zero, x0_fc, x_rest, ev=ev, ev_mask=ev_mask)
         x1_hat_fc = x0_fc + v_fc
         loss_fc = fc_loss_torch(
             x1_hat_fc, x1,
@@ -1245,7 +1034,7 @@ def flow_matching_loss(
     # --- Coherence loss: independent x0 → own gradient path ---
     if coh_loss_weight > 0:
         x0_coh = model.sample_x0(x_rest, T)
-        v_coh = model.velocity(t_zero, x0_coh, x_rest, ev=ev, ev_mask=ev_mask, task_start_idx=task_start_idx)
+        v_coh = model.velocity(t_zero, x0_coh, x_rest, ev=ev, ev_mask=ev_mask)
         x1_hat_coh = x0_coh + v_coh
         loss_coh = coherence_loss_torch(x1_hat_coh, x1)
         loss_total = loss_total + coh_loss_weight * loss_coh
@@ -1280,11 +1069,6 @@ def compute_val_composite_loss(
             x_task = batch["target"].to(device).float()
             ev = batch["ev"].to(device).float() if batch.get("ev") is not None else None
             ev_mask = batch["ev_mask"].to(device).float() if batch.get("ev_mask") is not None else None
-            task_start_idx = batch.get("task_start_idx")
-            if task_start_idx is not None and not isinstance(task_start_idx, torch.Tensor):
-                task_start_idx = torch.tensor(task_start_idx, device=device, dtype=torch.float32)
-            elif task_start_idx is not None:
-                task_start_idx = task_start_idx.to(device)
 
             loss, _, _, _, _ = flow_matching_loss(
                 model,
@@ -1292,7 +1076,6 @@ def compute_val_composite_loss(
                 x_task,
                 ev=ev,
                 ev_mask=ev_mask,
-                task_start_idx=task_start_idx,
                 fm_loss_weight=fm_loss_weight,
                 freq_loss_weight=freq_loss_weight,
                 fc_loss_weight=fc_loss_weight,
@@ -1334,11 +1117,6 @@ def train_epoch(
         x_task = batch["target"].to(device).float()
         ev = batch["ev"].to(device).float() if batch.get("ev") is not None else None
         ev_mask = batch["ev_mask"].to(device).float() if batch.get("ev_mask") is not None else None
-        task_start_idx = batch.get("task_start_idx")
-        if task_start_idx is not None and not isinstance(task_start_idx, torch.Tensor):
-            task_start_idx = torch.tensor(task_start_idx, device=device, dtype=torch.float32)
-        elif task_start_idx is not None:
-            task_start_idx = task_start_idx.to(device)
 
         opt.zero_grad()
         loss, lm, lf, lc, lcoh = flow_matching_loss(
@@ -1347,7 +1125,6 @@ def train_epoch(
             x_task,
             ev=ev,
             ev_mask=ev_mask,
-            task_start_idx=task_start_idx,
             fm_loss_weight=fm_loss_weight,
             freq_loss_weight=freq_loss_weight,
             fc_loss_weight=fc_loss_weight,
@@ -1429,14 +1206,9 @@ def evaluate_subject_level_dedup(model, loader, device, pred_len, ode_steps=50, 
             if not isinstance(starts, (list, tuple)):
                 starts = list(starts)
 
-            task_start_idx = None
-            if isinstance(starts, torch.Tensor):
-                task_start_idx = starts.to(x_rest.device)
-            elif starts is not None:
-                task_start_idx = torch.tensor(starts, device=x_rest.device, dtype=torch.float32)
             x_pred = model.sample(
                 x_rest, T_pred=pred_len, steps=ode_steps,
-                ev=ev, ev_mask=ev_mask, task_start_idx=task_start_idx,
+                ev=ev, ev_mask=ev_mask,
             )
 
             x_pred_np = x_pred.cpu().numpy()
@@ -1684,14 +1456,9 @@ def evaluate_subject_level_dedup_with_best_subject(
             if not isinstance(starts, (list, tuple)):
                 starts = list(starts)
 
-            task_start_idx = None
-            if isinstance(starts, torch.Tensor):
-                task_start_idx = starts.to(x_rest.device)
-            elif starts is not None:
-                task_start_idx = torch.tensor(starts, device=x_rest.device, dtype=torch.float32)
             x_pred = model.sample(
                 x_rest, T_pred=pred_len, steps=ode_steps,
-                ev=ev, ev_mask=ev_mask, task_start_idx=task_start_idx,
+                ev=ev, ev_mask=ev_mask,
             )
             x_pred_np = x_pred.detach().cpu().numpy()
             x_task_np = x_task.detach().cpu().numpy()
@@ -1815,13 +1582,6 @@ def main():
     p.add_argument("--t_dim", type=int, default=128)
     p.add_argument("--num_conditions", type=int, default=32, help="Max condition code for EV embedding (use_evs)")
     p.add_argument("--d_ev", type=int, default=64, help="EV token dim and cross-attention dim (use_evs)")
-    # Event HRF timecourse: per-event HRF weights → timecourse K/V for attention
-    p.add_argument("--use_ev_hrf_timecourse", action="store_true", help="Use HRF timecourse-conditioned event K/V (requires --use_evs)")
-    p.add_argument("--ev_hrf_kernel_len", type=int, default=20, help="HRF kernel length in TRs for event timecourse")
-    p.add_argument("--ev_hrf_num_basis", type=int, default=3, help="Number of HRF basis per event")
-    p.add_argument("--no_ev_hrf_delay_width", action="store_true", help="Disable per-event delay/width for HRF timecourse")
-    p.add_argument("--ev_hrf_smooth_boxcar", action="store_true", help="Use smooth sigmoid boxcar instead of hard step")
-    p.add_argument("--ev_hrf_boxcar_sigma", type=float, default=0.5, help="Smoothing sigma for smooth boxcar (TRs)")
 
     # Training
     p.add_argument("--batch_size", type=int, default=16)
@@ -1947,13 +1707,11 @@ def main():
             saved_args = ckpt["args"]
             print("Found saved args in checkpoint. Using saved model architecture.")
             # Override args with saved ones for model architecture
-            for key in ["use_evs", "use_ev_hrf_timecourse",
+            for key in ["use_evs",
                        "rest_encoder", "rest_hidden", "ctx_dim", "t_dim",
                        "rest_patch_len", "rest_num_layers", "rest_nhead",
                        "rest_dim_feedforward", "prior_K", "use_prior_detach",
-                       "num_conditions", "d_ev",
-                       "ev_hrf_kernel_len", "ev_hrf_num_basis",
-                       "no_ev_hrf_delay_width", "ev_hrf_smooth_boxcar", "ev_hrf_boxcar_sigma"]:
+                       "num_conditions", "d_ev"]:
                 if key in saved_args:
                     setattr(args, key, saved_args[key])
         else:
@@ -1977,12 +1735,6 @@ def main():
         use_evs=args.use_evs,
         num_conditions=args.num_conditions,
         d_ev=args.d_ev,
-        use_ev_hrf_timecourse=args.use_ev_hrf_timecourse,
-        ev_hrf_kernel_len=args.ev_hrf_kernel_len,
-        ev_hrf_num_basis=args.ev_hrf_num_basis,
-        ev_hrf_use_delay_width=not args.no_ev_hrf_delay_width,
-        ev_hrf_smooth_boxcar=args.ev_hrf_smooth_boxcar,
-        ev_hrf_boxcar_sigma=args.ev_hrf_boxcar_sigma,
         prior_K=args.prior_K,
         use_prior_detach=args.use_prior_detach,
     ).to(args.device)
@@ -2077,13 +1829,11 @@ def main():
             for batch in test_loader:
                 x_rest = batch["input"].to(args.device).float()
                 x_task = batch["target"].to(args.device).float()
-                starts = batch["task_start_idx"]
                 ev = batch["ev"].to(args.device).float() if batch.get("ev") is not None else None
                 ev_mask = batch["ev_mask"].to(args.device).float() if batch.get("ev_mask") is not None else None
-                task_start_idx = starts.to(args.device) if isinstance(starts, torch.Tensor) else torch.tensor(starts, device=args.device, dtype=torch.float32)
                 x_pred = model.sample(
                     x_rest, T_pred=args.prediction_length, steps=args.ode_steps,
-                    ev=ev, ev_mask=ev_mask, task_start_idx=task_start_idx,
+                    ev=ev, ev_mask=ev_mask,
                 )
                 real_list.append(x_task.cpu().numpy())
                 gen_list.append(x_pred.cpu().numpy())

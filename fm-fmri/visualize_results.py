@@ -167,8 +167,6 @@ def grouped_ablation_plots(rows, output_dir: Path):
             groups["hyperparameter_tuning"].append(r)
         elif run_name.startswith("ablation_rest_encoder_"):
             groups["rest_encoder"].append(r)
-        elif run_name.startswith("ablation_ev_hrf_"):
-            groups["ev_hrf"].append(r)
         elif run_name.startswith("ablation_prior_detach_"):
             groups["prior_detach"].append(r)
     

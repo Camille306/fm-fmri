@@ -69,24 +69,12 @@
 ### EV data format
 
 - **Input:** EV table of shape **(N_events, 4)** per subject: **[onset (TR), duration (TR), amplitude, condition_id]**. Condition 0 is reserved for padding and is masked out in attention.
-- **Usage:** EVs are **not** inherently per-timepoint; they are event-level. Per-timepoint conditioning is achieved either by **cross-attention** (event tokens as K/V, trajectory timepoints as Q) or by **HRF-convolved event timecourses** that modulate event K/V per timepoint.
+- **Usage:** EVs are event-level. Per-timepoint conditioning is achieved by **cross-attention**: event tokens as K/V, trajectory timepoints as Q.
 
-### Two modes (mutually exclusive in the velocity network)
+### Cross-attention conditioning
 
-**A. Event tokens only (no HRF timecourse)**  
-- **EVEncoder:** First 3 columns (onset, duration, amplitude) → MLP → d_ev; 4th column (condition_id) → embedding → d_ev; **sum** → event token (B, N_events, d_ev).  
-- **Per-timepoint conditioning:** For each of the T timepoints, the velocity net has **Q = Linear(x_t)** and **K = V = event_tokens**. So each timepoint **attends over the same set of event tokens**; the only “temporal” signal is that x_t changes along the trajectory. There is **no HRF convolution** in this mode.
-
-**B. HRF timecourse-conditioned event K/V (optional)**  
-- **Flag:** `use_ev_hrf_timecourse` (off by default).  
-- **Event-level:** From EV table, **onset** and **duration** define a boxcar (or smooth sigmoid boxcar if `ev_hrf_smooth_boxcar`) in **window-relative TRs** (if `task_start_idx` is provided, onset is shifted by task start). Optional per-event **delay** and **width** are predicted from event tokens (`ev_hrf_use_delay_width`, default True) and applied to onset/duration.  
-- **HRF convolution:** The boxcar is convolved with a **per-event HRF kernel**. The kernel is a **learned linear combination of the same gamma-derived basis** (num_basis=3, kernel_len=20 TRs by default). Weights are computed from the event token (so each event gets its own HRF-shaped timecourse). Result is a **timecourse (B, N_events, T)** normalized to max 1 per event.  
-- **Per-timepoint conditioning:** **K** remains time-invariant: K = projK(event_tokens). **V** is made time-dependent: **V_tc(b,t,n,:) = event_token(b,n,:) * timecourse(b,n,t)**. The velocity net still uses **Q = Linear(x_t)**; attention is over events, but the **values** are scaled by the HRF timecourse at each timepoint t. So "EVs mapped to per-timepoint" here means: **HRF-convolved event timecourses** modulate the value vectors that each timepoint receives from each event. No HRF is applied to the BOLD rest input.
-
-### Summary
-
-- **EVs → per-timepoint:** Either (1) **cross-attention only**: same event K/V for all timepoints (no HRF), or (2) **EV HRF timecourse**: same event keys, **values** scaled by a per-event, HRF-convolved timecourse so that conditioning varies by timepoint.
-- **HRF usage:** Only on the EV path, and only when `use_ev_hrf_timecourse` is True: HRF is used to build **event-level timecourses** that weight the event **values** in cross-attention. No HRF is applied to the rest input.
+- **EVEncoder:** First 3 columns (onset, duration, amplitude) → MLP → d_ev; 4th column (condition_id) → embedding → d_ev; **sum** → event token (B, N_events, d_ev).
+- **Per-timepoint conditioning:** For each of the T timepoints, the velocity net has **Q = Linear(x_t)** and **K = V = event_tokens**. Each timepoint attends over the same set of event tokens; the only "temporal" signal is that x_t changes along the trajectory.
 
 ---
 
@@ -105,5 +93,4 @@
 
 # EVs (when --use_evs)
 --num_conditions 32 --d_ev 64
-# Optional: --use_ev_hrf_timecourse, ev_hrf_kernel_len 20, ev_hrf_num_basis 3
 ```
