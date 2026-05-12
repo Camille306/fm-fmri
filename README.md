@@ -1,17 +1,25 @@
 # FM-fMRI: Flow Matching for Rest-to-Task fMRI Prediction
 
-This repository contains the code accompanying our work on predicting task-evoked
-fMRI sequences from resting-state fMRI using conditional flow matching, together
-with a suite of baselines (TimeGAN, TimeVAE, DDPM, Diffusion-TS, LSTM-GAN,
-STAGIN, GAT, GCN+GAT, and Time-XL).
+This repository contains the code accompanying our work on predicting
+task-evoked fMRI sequences from resting-state fMRI using conditional flow
+matching, together with a suite of baselines (TimeGAN, TimeVAE, DDPM,
+Diffusion-TS, LSTM-GAN, and Time-XL).
 
-The repo covers two datasets:
-- **HCP** (Human Connectome Project) rest -> task prediction on Shen-268 ROIs.
-- **Biopoint** (in-house task-fMRI dataset) for graph-based classification and
-  rest-conditioned generation.
+The released code targets the **HCP** (Human Connectome Project) setup: rest
+-> task prediction on the Shen-268 atlas across the seven HCP tasks (emotion,
+gambling, language, motor, relational, social, working memory).
 
-> Subject identifiers, lab-internal paths, and HPC-specific scripts have been
-> removed from this public release. Only the source code is included; raw and
+> **A note on the Biopoint experiments.** The accompanying paper also reports
+> results on an in-house task-fMRI dataset (Biopoint) for graph-based
+> classification and rest-conditioned generation. Because that dataset is held
+> by the originating lab and cannot be redistributed, the corresponding code
+> (`biopoint/`, `gat_biopoint/`, `gcn_gat_biopoint/`, `stagin_biopoint/`, and
+> the Biopoint-specific re-evaluation scripts) is **not** included in this
+> public release. The HCP code in this repository is self-contained and
+> reproduces the HCP results in the paper.
+>
+> Subject identifiers, lab-internal paths, and HPC-specific submission
+> scripts have also been removed. Only source code is included; raw and
 > derived data must be obtained separately (see "Data" below).
 
 ---
@@ -21,10 +29,6 @@ The repo covers two datasets:
 ```
 fm-fmri/             Main flow-matching model (the primary method)
 baselines/           Re-organized baseline implementations for the HCP setup
-biopoint/            Biopoint-dataset experiments and dataloaders
-gat_biopoint/        GAT classifier on Biopoint
-gcn_gat_biopoint/    GCN + GAT variant on Biopoint
-stagin_biopoint/     STAGIN baseline on Biopoint
 timegan/             TimeGAN baseline (HCP)
 timeVAE/             TimeVAE baseline (HCP)
 time-xl/             Time-XL (xLSTM / Mamba / LSTM) baselines
@@ -44,7 +48,8 @@ script) describing what it does and the command-line flags it accepts.
 
 ## Installation
 
-The code targets **Python 3.10** with PyTorch >= 2.0. A representative environment:
+The code targets **Python 3.10** with PyTorch >= 2.0. A representative
+environment:
 
 ```bash
 python -m venv .venv
@@ -53,7 +58,6 @@ pip install --upgrade pip
 pip install torch torchvision torchaudio   # pick the CUDA build for your system
 pip install numpy scipy pandas tqdm matplotlib scikit-learn h5py einops
 pip install nibabel              # if you use task_preprocess/
-pip install torch-geometric      # for GAT / GCN / STAGIN baselines
 ```
 
 The `time-xl/` subproject has its own `requirements.txt`.
@@ -62,20 +66,16 @@ The `time-xl/` subproject has its own `requirements.txt`.
 
 ## Data
 
-The code expects a few directories under `./data/` (all paths are configurable
-via `--data_root`, `--task_root`, etc., on every script):
+The code expects two directories under `./data/` (paths are configurable via
+`--data_root` and `--task_root` on every script):
 
-| Default path                          | Contents                                 |
-|---------------------------------------|------------------------------------------|
-| `./data/hcp-resting-fc/<task>/<sub>/` | HCP resting-state Shen-268 ROI series    |
-| `./data/hcp-task-ts/<task>/<sub>/`    | HCP task-fMRI Shen-268 ROI series        |
-| `./data/biopoint_data/`               | Biopoint task-fMRI per-subject series    |
-| `./data/biopoint_dk_atlas/`           | Biopoint Desikan-Killiany ROI series     |
-| `./data/biopoint_data.csv`            | Biopoint subject metadata + labels       |
+| Default path                          | Contents                              |
+|---------------------------------------|---------------------------------------|
+| `./data/hcp-resting-fc/<task>/<sub>/` | HCP resting-state Shen-268 ROI series |
+| `./data/hcp-task-ts/<task>/<sub>/`    | HCP task-fMRI Shen-268 ROI series     |
 
-We do **not** redistribute either dataset. Obtain HCP data through
-[ConnectomeDB](https://db.humanconnectome.org/) under the HCP Data Use Terms;
-Biopoint data is held by the originating lab and is not publicly released.
+We do **not** redistribute HCP. Obtain it through
+[ConnectomeDB](https://db.humanconnectome.org/) under the HCP Data Use Terms.
 
 Once you have the data, point the scripts at it:
 
@@ -116,27 +116,14 @@ python baselines/diffusion_ts_baseline.py --task_name emotion
 python baselines/train_lstm_gan.py       --task_name emotion
 ```
 
-Outputs (per-task metrics, FC / PSD figures for the closest subject) are written
-to `--save_dir` (default `./results_<baseline>_<task>`).
+Outputs (per-task metrics, FC / PSD figures for the closest subject) are
+written to `--save_dir` (default `./results_<baseline>_<task>`).
 
-### 3. Biopoint experiments
-
-```bash
-# GAT classifier on Desikan-Killiany ROIs
-python gat_biopoint/main.py --data_root ./data/biopoint_dk_atlas
-
-# STAGIN baseline
-python stagin_biopoint/main.py
-
-# Flow matching on Biopoint
-python biopoint/run_flow_matching_biopoint.py
-```
-
-### 4. Re-evaluation
+### 3. Re-evaluation
 
 `re_eval/` builds JSON configs that point at a set of trained baselines, then
-recomputes metrics (FC similarity, PSD difference, discriminative score, cFID)
-on a common evaluation grid:
+recomputes metrics (FC similarity, PSD difference, discriminative score,
+cFID) on a common evaluation grid:
 
 ```bash
 python re_eval/build_baselines_config.py --out re_eval/my_config.json
@@ -157,13 +144,13 @@ All HCP-side methods use the same sliding-window protocol:
 3. **Metrics.** MSE, MAE, FC similarity (Pearson on the upper triangle of the
    correlation matrix), and PSD difference (mean ROI power spectrum).
 
-Per-baseline scripts save two qualitative figures for the closest test subject
-(lowest MSE) -- `closest_subject_<id>_fc.png` and `closest_subject_<id>_psd.png`
--- produced by helpers in `eval_viz.py`.
+Per-baseline scripts save two qualitative figures for the closest test
+subject (lowest MSE) -- `closest_subject_<id>_fc.png` and
+`closest_subject_<id>_psd.png` -- produced by helpers in `eval_viz.py`.
 
 ---
 
-## Reproducing the paper
+## Reproducing the paper (HCP results)
 
 A representative end-to-end run on a single HCP task:
 
@@ -192,8 +179,8 @@ Substitute `emotion` with any HCP task (`gambling`, `language`, `motor`,
   to the actual location of your data, or override on the command line.
 - The codebase originated on an HPC cluster; cluster-specific submission
   scripts (SLURM, rsync helpers) have been omitted from this release.
-- If you find a bug or have trouble reproducing a result, please open a GitHub
-  issue.
+- If you find a bug or have trouble reproducing a result, please open a
+  GitHub issue.
 
 ---
 
@@ -204,7 +191,5 @@ If this code is useful in your research, please cite the accompanying paper.
 
 ## License
 
-A repository-wide `LICENSE` file has not been added yet. The vendored
-`time-xl/` subproject retains its own license; see `time-xl/LICENSE` (Apache
-2.0). Please add a top-level `LICENSE` before publishing the repo (MIT,
-Apache 2.0, and BSD-3 are all common choices for research code).
+Released under the MIT License -- see `LICENSE`. The vendored `time-xl/`
+subproject retains its own license; see `time-xl/LICENSE` (Apache 2.0).

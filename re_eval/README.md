@@ -129,27 +129,7 @@ The unified script in §3 only runs **FM-TS** checkpoints (`best_fmts.pth`). To 
 
 ---
 
-## 5. Biopoint runs (FM-TS and baselines)
-
-Biopoint uses a different dataset and paths. Re-eval scripts above (§3–§4) use **HCP** data. For Biopoint:
-
-**Where Biopoint results live (same as `biopoint/slurm`):** FM-TS: `results_flow_matching_biopoint/` or `results_fm_biopoint_sweep_freq_fc/runs/<name>/` or `results_flow_matching_biopoint_ablations/runs/<name>/`. Baselines: `results_biopoint/<model>/` (e.g. `results_biopoint/timegan/`).
-
-**Build Biopoint config** (from `re_eval/re_eval/`): `python build_biopoint_config.py` → `biopoint.json`. Options: `--no_fm`, `--no_baselines`, `--fm_base`, `--sweep_base`, `--ablations_base`, `--results_biopoint`.
-
-**Run Biopoint baseline-only metrics** (from repo root):  
-`python re_eval/run_biopoint_baseline_only_metrics.py --config re_eval/re_eval/biopoint.json --out_csv re_eval/results_biopoint_baseline_only.tsv`  
-Uses `--data_root`, `--csv_path`, `--results_biopoint`; `--skip_run` to only collect.
-
-**Re-eval Biopoint FM-fMRI** (Flow Matching entries in `biopoint.json`):  
-`python re_eval/run_biopoint_fm_only_metrics.py --config re_eval/re_eval/biopoint.json --out_csv re_eval/results_biopoint_fm_only.tsv`  
-For each entry with `model_type: "fmts"` (e.g. `biopoint_fm/single`, `biopoint_fm/sweep/<name>`), runs `biopoint/run_flow_matching_biopoint.py --eval_only --save_dir <load_dir>`, then parses `test_results.txt` and writes one TSV. Uses `--data_root`, `--csv_path`; `--skip_run` to only collect from existing `test_results.txt`.
-
-**Full unified re-eval on Biopoint** (cFID-FC, discriminative, etc.) is not in `run_all_baselines_metrics.py` (HCP only). Use `biopoint/slurm/collect_baselines_biopoint.py` and `biopoint/slurm/collect_ablations_flow_matching.py` for Biopoint.
-
----
-
-## 6. Group-level FC comparison (real vs FM-fMRI vs baseline)
+## 5. Group-level FC comparison (real vs FM-fMRI vs baseline)
 
 **`run_group_fc_comparison.py`** picks the **best** FM-fMRI and baseline checkpoints for a given task by reading **`test_results.txt`** in each config entry’s `load_dir` and selecting the entry with the **highest FC top-5% precision** (tiebreak: FC similarity). It then runs both models on the same test set and plots **group-level average Functional Connectivity** matrices: real (group avg), FM-fMRI generated (group avg), and baseline generated (group avg).
 
