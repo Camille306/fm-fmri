@@ -1,0 +1,11 @@
+[
+  {
+    "name": "FM-TS emotion best",
+    "load_dir": "/path/to/fmts/emotion/best_run"
+  },
+  {
+    "name": "FM-TS gambling best",
+    "load_dir": "/path/to/fmts/gambling/best_run",
+    "task_name": "gambling"
+  }
+]

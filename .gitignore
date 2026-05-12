@@ -1,0 +1,93 @@
+# ---- Python ----
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+*.egg-info/
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.cursorignore
+
+# ---- Data (do NOT commit datasets) ----
+data/
+datasets/
+*.csv
+*.tsv
+*.h5
+*.npz
+*.npy
+extracted_txt/
+
+# ---- Model files / checkpoints ----
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.pkl
+checkpoints/
+checkpoints_*/
+**/checkpoints/
+**/checkpoints_*/
+
+# ---- Runs / results / outputs ----
+runs/
+**/runs/
+results/
+results_*/
+**/results/
+**/results_*/
+final_runs/
+*_runs/
+**/*_runs/
+synthetic_*/
+figures_group/
+sweep_results/
+seed_sweep_logs/
+wandb/
+mlruns/
+
+# ---- Logs ----
+logs/
+**/logs/
+*.log
+*.out
+*.err
+slurm-*.out
+events.out.tfevents.*
+**/events.out.tfevents.*
+discriminative_scores.txt
+lstm_gan_combined.txt
+**/test_results.txt
+
+# ---- Figures ----
+# We do NOT block image extensions at the top level so that
+# paper / README figures committed in subfolders (e.g. time-xl/figures/) pass
+# through. Per-run figures are already covered by the runs/ / results/ /
+# checkpoints/ rules above. Add specific entries below if you produce ad-hoc
+# figures at the repo root that should not be committed.
+#
+# *.png
+# *.jpg
+# *.pdf
+
+# ---- HPC / scheduler scripts (kept out of this public release) ----
+*.slurm
+**/slurm/
+
+# ---- Local helper scripts you don't want to publish ----
+sync_*.sh
+sync_*.bat
+reset_*.ps1
+
+# ---- Misc local-only ----
+data_local/

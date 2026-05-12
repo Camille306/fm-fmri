@@ -1,0 +1,3 @@
+# Force LF for shell/SLURM so cluster sbatch/bash work (no DOS \r\n)
+*.sh text eol=lf
+*.slurm text eol=lf

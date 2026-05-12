@@ -1,0 +1,170 @@
+[
+    {
+      "name": "baseline/timegan/emotion",
+      "load_dir": ".//rest_to_task/results/timegan/emotion",
+      "task_name": "emotion",
+      "model_type": "timegan"
+    },
+    {
+      "name": "baseline/timegan/gambling",
+      "load_dir": ".//rest_to_task/results/timegan/gambling",
+      "task_name": "gambling",
+      "model_type": "timegan"
+    },
+    {
+      "name": "baseline/timegan/language",
+      "load_dir": ".//rest_to_task/results/timegan/language",
+      "task_name": "language",
+      "model_type": "timegan"
+    },
+    {
+      "name": "baseline/timegan/motor",
+      "load_dir": ".//rest_to_task/results/timegan/motor",
+      "task_name": "motor",
+      "model_type": "timegan"
+    },
+    {
+      "name": "baseline/timegan/relational",
+      "load_dir": ".//rest_to_task/results/timegan/relational",
+      "task_name": "relational",
+      "model_type": "timegan"
+    },
+    {
+      "name": "baseline/timegan/social",
+      "load_dir": ".//rest_to_task/results/timegan/social",
+      "task_name": "social",
+      "model_type": "timegan"
+    },
+    {
+      "name": "baseline/timegan/WM",
+      "load_dir": ".//rest_to_task/results/timegan/WM",
+      "task_name": "WM",
+      "model_type": "timegan"
+    },
+    {
+      "name": "baseline/timevae/emotion",
+      "load_dir": ".//rest_to_task/results/timevae/emotion",
+      "task_name": "emotion",
+      "model_type": "timevae"
+    },
+    {
+      "name": "baseline/timevae/gambling",
+      "load_dir": ".//rest_to_task/results/timevae/gambling",
+      "task_name": "gambling",
+      "model_type": "timevae"
+    },
+    {
+      "name": "baseline/timevae/language",
+      "load_dir": ".//rest_to_task/results/timevae/language",
+      "task_name": "language",
+      "model_type": "timevae"
+    },
+    {
+      "name": "baseline/timevae/motor",
+      "load_dir": ".//rest_to_task/results/timevae/motor",
+      "task_name": "motor",
+      "model_type": "timevae"
+    },
+    {
+      "name": "baseline/timevae/relational",
+      "load_dir": ".//rest_to_task/results/timevae/relational",
+      "task_name": "relational",
+      "model_type": "timevae"
+    },
+    {
+      "name": "baseline/timevae/social",
+      "load_dir": ".//rest_to_task/results/timevae/social",
+      "task_name": "social",
+      "model_type": "timevae"
+    },
+    {
+      "name": "baseline/timevae/WM",
+      "load_dir": ".//rest_to_task/results/timevae/WM",
+      "task_name": "WM",
+      "model_type": "timevae"
+    },
+    {
+      "name": "baseline/diffusion_ts/emotion",
+      "load_dir": ".//rest_to_task/results/diffusion_ts/emotion",
+      "task_name": "emotion",
+      "model_type": "diffusion_ts"
+    },
+    {
+      "name": "baseline/diffusion_ts/gambling",
+      "load_dir": ".//rest_to_task/results/diffusion_ts/gambling",
+      "task_name": "gambling",
+      "model_type": "diffusion_ts"
+    },
+    {
+      "name": "baseline/diffusion_ts/language",
+      "load_dir": ".//rest_to_task/results/diffusion_ts/language",
+      "task_name": "language",
+      "model_type": "diffusion_ts"
+    },
+    {
+      "name": "baseline/diffusion_ts/motor",
+      "load_dir": ".//rest_to_task/results/diffusion_ts/motor",
+      "task_name": "motor",
+      "model_type": "diffusion_ts"
+    },
+    {
+      "name": "baseline/diffusion_ts/relational",
+      "load_dir": ".//rest_to_task/results/diffusion_ts/relational",
+      "task_name": "relational",
+      "model_type": "diffusion_ts"
+    },
+    {
+      "name": "baseline/diffusion_ts/social",
+      "load_dir": ".//rest_to_task/results/diffusion_ts/social",
+      "task_name": "social",
+      "model_type": "diffusion_ts"
+    },
+    {
+      "name": "baseline/diffusion_ts/WM",
+      "load_dir": ".//rest_to_task/results/diffusion_ts/WM",
+      "task_name": "WM",
+      "model_type": "diffusion_ts"
+    },
+    {
+      "name": "baseline/ddpm/emotion",
+      "load_dir": ".//rest_to_task/results/ddpm/emotion",
+      "task_name": "emotion",
+      "model_type": "ddpm"
+    },
+    {
+      "name": "baseline/ddpm/gambling",
+      "load_dir": ".//rest_to_task/results/ddpm/gambling",
+      "task_name": "gambling",
+      "model_type": "ddpm"
+    },
+    {
+      "name": "baseline/ddpm/language",
+      "load_dir": ".//rest_to_task/results/ddpm/language",
+      "task_name": "language",
+      "model_type": "ddpm"
+    },
+    {
+      "name": "baseline/ddpm/motor",
+      "load_dir": ".//rest_to_task/results/ddpm/motor",
+      "task_name": "motor",
+      "model_type": "ddpm"
+    },
+    {
+      "name": "baseline/ddpm/relational",
+      "load_dir": ".//rest_to_task/results/ddpm/relational",
+      "task_name": "relational",
+      "model_type": "ddpm"
+    },
+    {
+      "name": "baseline/ddpm/social",
+      "load_dir": ".//rest_to_task/results/ddpm/social",
+      "task_name": "social",
+      "model_type": "ddpm"
+    },
+    {
+      "name": "baseline/ddpm/WM",
+      "load_dir": ".//rest_to_task/results/ddpm/WM",
+      "task_name": "WM",
+      "model_type": "ddpm"
+    }
+  ]
